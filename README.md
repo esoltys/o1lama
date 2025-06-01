@@ -35,8 +35,8 @@ The project now uses the official Ollama Python bindings for improved integratio
 
 3. Set up a Python virtual environment:
    ```
-   python3 -m venv venv
-   source venv/bin/activate
+   python3 -m venv .venv
+   source .venv/bin/activate
    ```
 
 4. Install the required packages:
