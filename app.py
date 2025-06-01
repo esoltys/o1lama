@@ -208,26 +208,21 @@ def render_latex(content):
     # Replace "### Quality Score:" with "**Quality Score:**"
     content = content.replace("### Quality Score:", "**Quality Score:**")
     
-    # Escape colons that are not part of LaTeX commands
-    content = re.sub(r'(?<!\\\w):(?!\s*\\\w)', '\\:', content)
+    # For inline LaTeX (single $), keep it in the markdown
+    # Only extract display LaTeX ($$...$$ or \[...\]) for separate rendering
+    display_pattern = r'(\$\$[^\$]+\$\$|\\\[[^\]]+\\\])'
+    parts = re.split(display_pattern, content)
     
-    # Split the content into LaTeX and non-LaTeX parts
-    parts = re.split(r'(\\\[.*?\\\]|\$\$.*?\$\$|\$.*?\$)', content, flags=re.DOTALL)
-    rendered_parts = []
     for part in parts:
-        if part.startswith('\\[') and part.endswith('\\]'):
+        if part.startswith('$$') and part.endswith('$$'):
             # Render display LaTeX
-            rendered_parts.append(st.latex(part.strip('\\[]')))
-        elif part.startswith('$$') and part.endswith('$$'):
+            st.latex(part.strip('$'))
+        elif part.startswith('\\[') and part.endswith('\\]'):
             # Render display LaTeX
-            rendered_parts.append(st.latex(part.strip('$')))
-        elif part.startswith('$') and part.endswith('$'):
-            # Render inline LaTeX
-            rendered_parts.append(st.latex(part.strip('$')))
+            st.latex(part.strip('\\[]'))
         elif part.strip():
-            # Render regular text
-            rendered_parts.append(st.markdown(part))
-    return rendered_parts
+            # Render text with inline LaTeX preserved
+            st.markdown(part)
 
 
 def main():

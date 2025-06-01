@@ -15,14 +15,8 @@ The project now uses the official Ollama Python bindings for improved integratio
 - **Visual Warnings**: Alerts users when responses are truncated due to token limitations, suggesting increases in max token value.
 - **Performance Metrics**: Shows total thinking time, giving users insight into the model's processing speed.
 - **Expandable Steps**: Each reasoning step is presented in an expandable format, allowing users to focus on specific parts of the reasoning process.
-- **Knowledge Graph**: Visualizes the relationships between different reasoning steps using a network graph.
-- **Strongest Path**: Highlights the most relevant path of reasoning in the knowledge graph.
-- **LaTeX Support**: Renders mathematical notations and formulas using LaTeX for clear presentation of mathematical concepts.
-
-## Example:
-
-![Screenshot 1](screenshot-01.png)
-![Screenshot 2](screenshot-02.png)
+- **Step Statistics**: Displays comprehensive metrics including total steps, average words per step, time metrics, backtracking count, and self-reflection count.
+- **LaTeX Support**: Renders mathematical notations and formulas using LaTeX with proper inline support for better readability.
 
 ### Quickstart
 
@@ -75,7 +69,12 @@ The full prompt can be found in the `generate_response` function in `app.py`.
 1. **Reasoning Steps**: Each step is shown as an expandable section with a title and content.
 2. **Final Answer**: Displayed after all reasoning steps.
 3. **Total Thinking Time**: The time taken by the LLM to generate the response.
-4. **Knowledge Graph**: A visual representation of the relationships between reasoning steps.
+4. **Step Statistics**: Comprehensive metrics about the reasoning process including:
+   - Total number of reasoning steps
+   - Average words per step
+   - Total and average time per step
+   - Number of backtracking steps
+   - Number of self-reflection steps
 
 
 ### Sample Query 1: Sequential Reasoning
@@ -86,10 +85,15 @@ The full prompt can be found in the `generate_response` function in `app.py`.
 
 > A rope ladder hangs over the side of a boat. If the tide rises by 2 feet, how much higher will the ladder be above the water?
 
+### Sample Query 3: Mathematical Reasoning
+
+> A train leaves City A for City B, traveling at 60 mph. At the same time, another train leaves City B for City A, traveling at 40 mph. The distance between the two cities is 200 miles. How long will it take for the two trains to meet?
+
+> A farmer has a 100-pound sack of grain but must cross a river. He can only carry 50 pounds at a time. Each time he crosses, 10% of the grain spills. How much grain will remain after three trips?
+
 ### Acknowledgements
 
 Forked from [g1](https://github.com/bklieger-groq/g1) which is an o1-like reasoning chain on groq by [Benjamin Klieger](https://github.com/bklieger-groq)
 
-I liked the idea of a [Local Knowledge Graph](https://github.com/punnerud/Local_Knowledge_Graph) by [Morten Punnerud-Engelstad](https://github.com/punnerud)
 
 I refactored a more detailed CoT prompt from [LLM-Research-Scripts](https://github.com/harishsg993010/LLM-Research-Scripts) by [Harish](https://github.com/harishsg993010)
