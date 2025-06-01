@@ -3,10 +3,8 @@ import ollama
 import json
 import time
 import re
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-import networkx as nx
-from graph_utils import plot_graph
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 def get_available_models():
     try:
@@ -28,39 +26,66 @@ def make_api_call(messages, max_tokens, model_name, is_final_answer=False):
                 }
             )
             
-            print(f"Raw API response: {response}")
+            # Debug: Log response structure
+            print(f"Response type: {type(response)}")
+            print(f"Response.message: {response.message}")
+            print(f"Response.done: {response.done}")
             
-            if 'message' not in response or 'content' not in response['message']:
+            if not hasattr(response, 'message') or not hasattr(response.message, 'content'):
                 raise ValueError(f"Unexpected API response structure: {response}")
             
-            content = response['message']['content']
-            done_reason = response.get('done', False)
+            content = response.message.content
+            done_reason = response.done_reason if hasattr(response, 'done_reason') else 'completed'
+            
+            if not content:
+                raise ValueError("Empty response content")
+            
+            # Debug: Show first 500 chars of raw content
+            print(f"Raw content (first 500 chars): {content[:500]}...")
             
             # Remove any content before the first step or final answer
             content = re.sub(r'^.*?((?:### )?Step 1:|### Final Answer:)', r'\1', content, flags=re.DOTALL)
             
-            # Parse the multi-step response
-            steps = re.split(r'((?:### )?Step \d+:.*?(?=\n)|### Final Answer:.*?(?=\n))', content, flags=re.DOTALL)
-            steps = [step.strip() for step in steps if step.strip()]
-
+            # Debug: Show content after cleanup
+            print(f"Content after cleanup (first 500 chars): {content[:500]}...")
+            
+            # Parse the multi-step response - more robust pattern
+            # Look for Step X: at the beginning of a line, capture everything until the next Step or Final Answer
+            pattern = r'((?:### )?Step \d+:[^\n]*)'
+            final_pattern = r'(### Final Answer:[^\n]*)'
+            
+            # Find all step headers and final answer
+            step_headers = [(m.group(1), m.start(), m.end()) for m in re.finditer(pattern, content)]
+            final_match = re.search(final_pattern, content)
+            
+            if final_match:
+                step_headers.append((final_match.group(1), final_match.start(), final_match.end()))
+            
+            # Debug: Print found headers
+            print(f"Found {len(step_headers)} headers: {[h[0] for h in step_headers]}")
+            
             parsed_steps = []
-            for i in range(0, len(steps), 2):
-                if i + 1 < len(steps):
-                    title = steps[i].strip()
-                    content = steps[i+1].strip()
-                    
-                    if "Final Answer" in title:
-                        next_action = "final_answer"
-                    else:
-                        if not title.startswith("###"):
-                            title = f"### {title}"
-                        next_action = "continue"
-                    
-                    parsed_steps.append({
-                        "title": title,
-                        "content": content,
-                        "next_action": next_action
-                    })
+            for i, (header, start, end) in enumerate(step_headers):
+                # Get content until next header or end of string
+                if i + 1 < len(step_headers):
+                    content_end = step_headers[i + 1][1]
+                else:
+                    content_end = len(content)
+                
+                step_content = content[end:content_end].strip()
+                
+                if "Final Answer" in header:
+                    next_action = "final_answer"
+                else:
+                    if not header.startswith("###"):
+                        header = f"### {header}"
+                    next_action = "continue"
+                
+                parsed_steps.append({
+                    "title": header,
+                    "content": step_content,
+                    "next_action": next_action
+                })
 
             # If we found valid steps, return them along with done_reason
             if parsed_steps:
@@ -83,33 +108,148 @@ def make_api_call(messages, max_tokens, model_name, is_final_answer=False):
 
     return None, None
 
-def get_embedding(text, model_name):
-    response = ollama.embeddings(model=model_name, prompt=text)
-    return np.array(response['embedding'])
-
-def calculate_similarity(embedding1, embedding2):
-    return cosine_similarity(embedding1.reshape(1, -1), embedding2.reshape(1, -1))[0][0]
-
-def find_strongest_path(G, start, end):
-    def dfs(node, path, total_weight):
-        if node == end:
-            return path, total_weight
+def create_reasoning_flow_diagram(reasoning_steps):
+    """Create a linear flow diagram showing reasoning progression with quality scores and backtracking"""
+    if not reasoning_steps:
+        return None
+    
+    # Extract step numbers, titles, and quality scores
+    step_data = []
+    for i, (title, content, thinking_time) in enumerate(reasoning_steps):
+        # Try to extract quality score from content
+        quality_match = re.search(r'Quality Score:\s*(\d+\.\d+)', content)
+        quality_score = float(quality_match.group(1)) if quality_match else None
         
-        best_path, best_weight = None, -float('inf')
-        for neighbor in G.neighbors(node):
-            if neighbor not in path:
-                edge_weight = G[node][neighbor]['weight']
-                new_path, new_weight = dfs(neighbor, path + [neighbor], total_weight + edge_weight)
-                if new_path and new_weight > best_weight:
-                    best_path, best_weight = new_path, new_weight
+        # Check if this is a backtracking step
+        is_backtrack = 'backtrack' in content.lower() or 'reconsider' in content.lower()
         
-        return best_path, best_weight
-
-    strongest_path, _ = dfs(start, [start], 0)
-    if strongest_path:
-        strongest_edges = list(zip(strongest_path[:-1], strongest_path[1:]))
-        return strongest_path, strongest_edges
-    return None, None
+        step_data.append({
+            'number': i + 1,
+            'title': title.replace('### ', '').replace('Step ', ''),
+            'quality_score': quality_score,
+            'is_backtrack': is_backtrack,
+            'thinking_time': thinking_time
+        })
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Add progress bar background
+    fig.add_shape(
+        type="rect",
+        x0=0, y0=0.4, x1=len(step_data), y1=0.6,
+        fillcolor="lightgray",
+        line=dict(width=0)
+    )
+    
+    # Add steps as markers on the timeline
+    x_positions = list(range(1, len(step_data) + 1))
+    y_positions = [0.5] * len(step_data)
+    
+    # Colors based on quality scores and backtracking
+    colors = []
+    for step in step_data:
+        if step['is_backtrack']:
+            colors.append('red')
+        elif step['quality_score'] is not None:
+            if step['quality_score'] >= 0.8:
+                colors.append('green')
+            elif step['quality_score'] >= 0.5:
+                colors.append('yellow')
+            else:
+                colors.append('orange')
+        else:
+            colors.append('blue')
+    
+    # Add step markers
+    fig.add_trace(go.Scatter(
+        x=x_positions,
+        y=y_positions,
+        mode='markers+text',
+        marker=dict(
+            size=20,
+            color=colors,
+            line=dict(width=2, color='black')
+        ),
+        text=[f"Step {s['number']}" for s in step_data],
+        textposition="top center",
+        hovertemplate=[
+            f"<b>{s['title']}</b><br>" +
+            (f"Quality Score: {s['quality_score']}<br>" if s['quality_score'] else "") +
+            f"Thinking Time: {s['thinking_time']:.1f}s<br>" +
+            ("Backtracking" if s['is_backtrack'] else "") +
+            "<extra></extra>"
+            for s in step_data
+        ],
+        showlegend=False
+    ))
+    
+    # Add quality score annotations
+    for i, step in enumerate(step_data):
+        if step['quality_score'] is not None:
+            fig.add_annotation(
+                x=i + 1,
+                y=0.35,
+                text=f"{step['quality_score']:.2f}",
+                showarrow=False,
+                font=dict(size=10)
+            )
+    
+    # Update layout
+    fig.update_layout(
+        title="Reasoning Flow Timeline",
+        xaxis=dict(
+            title="Steps",
+            range=[0, len(step_data) + 1],
+            showgrid=False,
+            zeroline=False
+        ),
+        yaxis=dict(
+            range=[0, 1],
+            showticklabels=False,
+            showgrid=False,
+            zeroline=False
+        ),
+        height=300,
+        margin=dict(l=50, r=50, t=50, b=50),
+        plot_bgcolor='white'
+    )
+    
+    # Add legend
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=10, color='green'),
+        legendgroup='quality',
+        showlegend=True,
+        name='High Quality (≥0.8)'
+    ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=10, color='yellow'),
+        legendgroup='quality',
+        showlegend=True,
+        name='Medium Quality (≥0.5)'
+    ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=10, color='orange'),
+        legendgroup='quality',
+        showlegend=True,
+        name='Low Quality (<0.5)'
+    ))
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=10, color='red'),
+        legendgroup='quality',
+        showlegend=True,
+        name='Backtracking'
+    ))
+    
+    return fig
 
 
 def generate_response(prompt, model_name, max_tokens):
@@ -129,7 +269,7 @@ def generate_response(prompt, model_name, max_tokens):
    - Below 0.5: Seriously consider backtracking and trying a different approach
    - If writing out the quality score do so in the format "**Quality Score:** 0.8" for example.
 9. If unsure or if your score is low, backtrack and try a different approach, explaining your decision.
-10. For mathematical problems, show all work explicitly using LaTeX for formal notation and provide detailed proofs. Use $ for inline LaTeX and $$ for display LaTeX.
+10. For mathematical problems, show all work explicitly. If using LaTeX, ensure it's within the step content, not in the step headers. Use $ for inline LaTeX and $$ for display LaTeX.
 11. Explore multiple solutions individually if possible, comparing approaches in your reflections.
 12. Write out all calculations and reasoning explicitly.
 13. Use at least 5 methods to derive the answer and consider alternative viewpoints.
@@ -139,22 +279,23 @@ def generate_response(prompt, model_name, max_tokens):
 17. In the "### Final Answer:" step, provide a concise summary of your conclusion.
 
 Example structure:
-### Step 1: [Step Title]
-[Detailed thought process, exploring multiple angles]
-[Assign quality score]
-[Step 1 content]
+### Step 1: Understanding the Problem
+Let me analyze what we're being asked to do here...
+[Detailed thought process]
+**Quality Score:** 0.9
 
-### Step 2: [Step Title]
-[Detailed thought process, exploring multiple angles]
-[Assign quality score]
-[Step 2 content]
+### Step 2: Identifying Key Constraints
+The main constraints are...
+[Detailed analysis]
+**Quality Score:** 0.8
 
-### Step 3: [Step Title]
-[Detailed thought process, exploring multiple angles]
-[Assign quality score]
-[Step 3 content]
+### Step 3: Exploring Initial Approach
+I'll start by considering...
+[Step content]
+**Quality Score:** 0.7
 
 ### Step 4: Self-Reflection
+Looking at my progress so far...
 [Detailed self-reflection on reasoning so far]
 [Consider potential biases and alternative viewpoints]
 [Decide whether to continue or change approach]
@@ -172,10 +313,6 @@ Remember to be thorough in your analysis and adapt your approach based on your o
     reasoning_steps = []
     total_thinking_time = 0
     
-    # Create graph
-    G = nx.Graph()
-    embeddings = []
-    
     start_time = time.time()
     step_data_list, done_reason = make_api_call(messages, max_tokens, model_name)
     end_time = time.time()
@@ -183,40 +320,14 @@ Remember to be thorough in your analysis and adapt your approach based on your o
     total_thinking_time += thinking_time
     
     for i, step_data in enumerate(step_data_list):
-        step_content = f"{step_data['title']}\n{step_data['content']}"
         reasoning_steps.append((step_data['title'].strip(), step_data['content'].strip(), thinking_time / len(step_data_list)))
         
-        # Generate embedding for this step
-        embedding = get_embedding(step_content, model_name)
-        embeddings.append(embedding)
-        
-        # Add node to graph
-        node_id = f"Step{i+1}"
-        G.add_node(node_id, label=step_data['title'].replace("### ", ""))
-        
-        # Calculate similarities with previous steps
-        for j in range(i):
-            similarity = calculate_similarity(embedding, embeddings[j])
-            if similarity > 0.5:  # Only add edges for high similarities
-                G.add_edge(f"Step{j+1}", node_id, weight=similarity)
-        
         if step_data['next_action'] == 'final_answer':
-            # Calculate strongest path
-            if len(G.nodes()) > 1:
-                try:
-                    strongest_path, strongest_edges = find_strongest_path(G, "Step1", node_id)
-                    print(f"Strongest edges: {strongest_edges}")  # Add this line for debugging
-                except Exception as e:
-                    print(f"Error finding strongest path: {e}")
-                    strongest_path, strongest_edges = None, None
-            else:
-                strongest_path, strongest_edges = None, None
-
-            yield reasoning_steps, (step_data['title'], step_data['content'], thinking_time), total_thinking_time, done_reason, G, strongest_edges
+            yield reasoning_steps, (step_data['title'], step_data['content'], thinking_time), total_thinking_time, done_reason
             return
     
     # This line should not be reached, but just in case:
-    yield reasoning_steps, None, total_thinking_time, done_reason, G, None
+    yield reasoning_steps, None, total_thinking_time, done_reason
 
 def render_latex(content):
     # Replace "### Quality Score:" with "**Quality Score:**"
@@ -258,11 +369,6 @@ def main():
     # Add dropdown for token selection with 1024 as default
     token_options = [512, 1024, 2048, 4096]
     selected_tokens = st.selectbox("Select max tokens:", token_options, index=token_options.index(1024))
-
-    # Add dropdown for layout selection
-    # layout_options = ['force', 'circular', 'spectral', 'kamada_kawai']
-    # selected_layout = st.selectbox("Select graph layout:", layout_options, index=0)
-    selected_layout = 'circular'  # Hard-code it to circular layout
     
     # Text area for user query (4 lines high)
     user_query = st.text_area("Enter your query:", placeholder="e.g., How many times does the letter 'R' appear in the word 'strawberry'?", height=120)
@@ -283,13 +389,9 @@ def main():
             final_reasoning_steps = []
             final_answer = None
             final_done_reason = None
-            final_graph = None
-            final_strongest_edges = None  # Changed from final_strongest_path
-            for reasoning_steps, answer, total_thinking_time, done_reason, graph, strongest_edges in generate_response(user_query, selected_model, selected_tokens):
+            for reasoning_steps, answer, total_thinking_time, done_reason in generate_response(user_query, selected_model, selected_tokens):
                 final_reasoning_steps = reasoning_steps
                 final_done_reason = done_reason
-                final_graph = graph
-                final_strongest_edges = strongest_edges  # Changed from final_strongest_path
                 if answer:
                     final_answer = answer
 
@@ -309,12 +411,13 @@ def main():
                 st.markdown("No detailed reasoning steps were provided.")
 
 
-        # Display the graph in its own container
+        # Display the reasoning flow diagram in its own container
         with graph_container.container():
-            if final_graph:
-                st.subheader("Knowledge Graph")
-                fig = plot_graph(final_graph, final_strongest_edges, layout_type=selected_layout)
-                st.plotly_chart(fig)
+            if final_reasoning_steps:
+                st.subheader("Reasoning Flow Timeline")
+                fig = create_reasoning_flow_diagram(final_reasoning_steps)
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
 
         # Show total time
         if total_thinking_time is not None:
