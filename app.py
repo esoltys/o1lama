@@ -3,8 +3,6 @@ import ollama
 import json
 import time
 import re
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 def get_available_models():
     try:
@@ -26,10 +24,6 @@ def make_api_call(messages, max_tokens, model_name, is_final_answer=False):
                 }
             )
             
-            # Debug: Log response structure
-            print(f"Response type: {type(response)}")
-            print(f"Response.message: {response.message}")
-            print(f"Response.done: {response.done}")
             
             if not hasattr(response, 'message') or not hasattr(response.message, 'content'):
                 raise ValueError(f"Unexpected API response structure: {response}")
@@ -40,14 +34,10 @@ def make_api_call(messages, max_tokens, model_name, is_final_answer=False):
             if not content:
                 raise ValueError("Empty response content")
             
-            # Debug: Show first 500 chars of raw content
-            print(f"Raw content (first 500 chars): {content[:500]}...")
             
             # Remove any content before the first step or final answer
             content = re.sub(r'^.*?((?:### )?Step 1:|### Final Answer:)', r'\1', content, flags=re.DOTALL)
             
-            # Debug: Show content after cleanup
-            print(f"Content after cleanup (first 500 chars): {content[:500]}...")
             
             # Parse the multi-step response - more robust pattern
             # Look for Step X: at the beginning of a line, capture everything until the next Step or Final Answer
@@ -61,8 +51,6 @@ def make_api_call(messages, max_tokens, model_name, is_final_answer=False):
             if final_match:
                 step_headers.append((final_match.group(1), final_match.start(), final_match.end()))
             
-            # Debug: Print found headers
-            print(f"Found {len(step_headers)} headers: {[h[0] for h in step_headers]}")
             
             parsed_steps = []
             for i, (header, start, end) in enumerate(step_headers):
@@ -108,148 +96,35 @@ def make_api_call(messages, max_tokens, model_name, is_final_answer=False):
 
     return None, None
 
-def create_reasoning_flow_diagram(reasoning_steps):
-    """Create a linear flow diagram showing reasoning progression with quality scores and backtracking"""
+def create_step_statistics(reasoning_steps, total_thinking_time):
+    """Create statistics about the reasoning process"""
     if not reasoning_steps:
         return None
     
-    # Extract step numbers, titles, and quality scores
-    step_data = []
-    for i, (title, content, thinking_time) in enumerate(reasoning_steps):
-        # Try to extract quality score from content
-        quality_match = re.search(r'Quality Score:\s*(\d+\.\d+)', content)
-        quality_score = float(quality_match.group(1)) if quality_match else None
-        
-        # Check if this is a backtracking step
-        is_backtrack = 'backtrack' in content.lower() or 'reconsider' in content.lower()
-        
-        step_data.append({
-            'number': i + 1,
-            'title': title.replace('### ', '').replace('Step ', ''),
-            'quality_score': quality_score,
-            'is_backtrack': is_backtrack,
-            'thinking_time': thinking_time
-        })
+    # Calculate statistics
+    num_steps = len(reasoning_steps)
+    avg_time_per_step = total_thinking_time / num_steps if num_steps > 0 else 0
     
-    # Create figure
-    fig = go.Figure()
+    # Check for backtracking
+    backtrack_count = 0
+    for _, content, _ in reasoning_steps:
+        if 'backtrack' in content.lower() or 'reconsider' in content.lower():
+            backtrack_count += 1
     
-    # Add progress bar background
-    fig.add_shape(
-        type="rect",
-        x0=0, y0=0.4, x1=len(step_data), y1=0.6,
-        fillcolor="lightgray",
-        line=dict(width=0)
-    )
+    # Check for self-reflection steps
+    reflection_count = sum(1 for title, _, _ in reasoning_steps if 'self-reflection' in title.lower() or 'reflection' in title.lower())
     
-    # Add steps as markers on the timeline
-    x_positions = list(range(1, len(step_data) + 1))
-    y_positions = [0.5] * len(step_data)
+    # Calculate average content length
+    avg_content_length = sum(len(content.split()) for _, content, _ in reasoning_steps) / num_steps if num_steps > 0 else 0
     
-    # Colors based on quality scores and backtracking
-    colors = []
-    for step in step_data:
-        if step['is_backtrack']:
-            colors.append('red')
-        elif step['quality_score'] is not None:
-            if step['quality_score'] >= 0.8:
-                colors.append('green')
-            elif step['quality_score'] >= 0.5:
-                colors.append('yellow')
-            else:
-                colors.append('orange')
-        else:
-            colors.append('blue')
-    
-    # Add step markers
-    fig.add_trace(go.Scatter(
-        x=x_positions,
-        y=y_positions,
-        mode='markers+text',
-        marker=dict(
-            size=20,
-            color=colors,
-            line=dict(width=2, color='black')
-        ),
-        text=[f"Step {s['number']}" for s in step_data],
-        textposition="top center",
-        hovertemplate=[
-            f"<b>{s['title']}</b><br>" +
-            (f"Quality Score: {s['quality_score']}<br>" if s['quality_score'] else "") +
-            f"Thinking Time: {s['thinking_time']:.1f}s<br>" +
-            ("Backtracking" if s['is_backtrack'] else "") +
-            "<extra></extra>"
-            for s in step_data
-        ],
-        showlegend=False
-    ))
-    
-    # Add quality score annotations
-    for i, step in enumerate(step_data):
-        if step['quality_score'] is not None:
-            fig.add_annotation(
-                x=i + 1,
-                y=0.35,
-                text=f"{step['quality_score']:.2f}",
-                showarrow=False,
-                font=dict(size=10)
-            )
-    
-    # Update layout
-    fig.update_layout(
-        title="Reasoning Flow Timeline",
-        xaxis=dict(
-            title="Steps",
-            range=[0, len(step_data) + 1],
-            showgrid=False,
-            zeroline=False
-        ),
-        yaxis=dict(
-            range=[0, 1],
-            showticklabels=False,
-            showgrid=False,
-            zeroline=False
-        ),
-        height=300,
-        margin=dict(l=50, r=50, t=50, b=50),
-        plot_bgcolor='white'
-    )
-    
-    # Add legend
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=10, color='green'),
-        legendgroup='quality',
-        showlegend=True,
-        name='High Quality (≥0.8)'
-    ))
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=10, color='yellow'),
-        legendgroup='quality',
-        showlegend=True,
-        name='Medium Quality (≥0.5)'
-    ))
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=10, color='orange'),
-        legendgroup='quality',
-        showlegend=True,
-        name='Low Quality (<0.5)'
-    ))
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode='markers',
-        marker=dict(size=10, color='red'),
-        legendgroup='quality',
-        showlegend=True,
-        name='Backtracking'
-    ))
-    
-    return fig
+    return {
+        'num_steps': num_steps,
+        'total_time': total_thinking_time,
+        'avg_time_per_step': avg_time_per_step,
+        'backtrack_count': backtrack_count,
+        'reflection_count': reflection_count,
+        'avg_content_length': avg_content_length
+    }
 
 
 def generate_response(prompt, model_name, max_tokens):
@@ -411,13 +286,30 @@ def main():
                 st.markdown("No detailed reasoning steps were provided.")
 
 
-        # Display the reasoning flow diagram in its own container
+        # Display step statistics in its own container
         with graph_container.container():
-            if final_reasoning_steps:
-                st.subheader("Reasoning Flow Timeline")
-                fig = create_reasoning_flow_diagram(final_reasoning_steps)
-                if fig:
-                    st.plotly_chart(fig, use_container_width=True)
+            if final_reasoning_steps and len(final_reasoning_steps) > 1:
+                # Exclude the final answer from statistics
+                reasoning_steps_only = final_reasoning_steps[:-1] if final_answer else final_reasoning_steps
+                stats = create_step_statistics(reasoning_steps_only, total_thinking_time)
+                
+                if stats:
+                    st.subheader("📊 Reasoning Statistics")
+                    
+                    # Create columns for metrics
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Total Steps", stats['num_steps'])
+                        st.metric("Avg Words/Step", f"{stats['avg_content_length']:.0f}")
+                    
+                    with col2:
+                        st.metric("Total Time", f"{stats['total_time']:.1f}s")
+                        st.metric("Avg Time/Step", f"{stats['avg_time_per_step']:.1f}s")
+                    
+                    with col3:
+                        st.metric("Backtracking", stats['backtrack_count'])
+                        st.metric("Self-Reflections", stats['reflection_count'])
 
         # Show total time
         if total_thinking_time is not None:
