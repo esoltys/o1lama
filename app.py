@@ -10,8 +10,8 @@ from graph_utils import plot_graph
 
 def get_available_models():
     try:
-        models = ollama.list()
-        return [model['name'] for model in models['models']]
+        response = ollama.list()
+        return [model.model for model in response.models]
     except Exception as e:
         st.error(f"Failed to fetch models: {str(e)}")
         return ["llama3.2"]  # Return default model if fetching fails
@@ -88,7 +88,7 @@ def get_embedding(text, model_name):
     return np.array(response['embedding'])
 
 def calculate_similarity(embedding1, embedding2):
-    return cosine_similarity([embedding1], [embedding2])[0][0]
+    return cosine_similarity(embedding1.reshape(1, -1), embedding2.reshape(1, -1))[0][0]
 
 def find_strongest_path(G, start, end):
     def dfs(node, path, total_weight):
