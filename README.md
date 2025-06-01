@@ -77,6 +77,15 @@ The full prompt can be found in the `generate_response` function in `app.py`.
 3. **Total Thinking Time**: The time taken by the LLM to generate the response.
 4. **Knowledge Graph**: A visual representation of the relationships between reasoning steps.
 
+
+### Sample Query 1: Sequential Reasoning
+
+> A farmer needs to transport a wolf, a goat, and a cabbage across a river. He has a boat that can carry only one item at a time. If he leaves the wolf with the goat, the wolf will eat the goat. If he leaves the goat with the cabbage, the goat will eat the cabbage. How can the farmer transport all three safely across the river?
+
+### Sample Query 2: Counterintuitive
+
+> A rope ladder hangs over the side of a boat. If the tide rises by 2 feet, how much higher will the ladder be above the water?
+
 ### Acknowledgements
 
 Forked from [g1](https://github.com/bklieger-groq/g1) which is an o1-like reasoning chain on groq by [Benjamin Klieger](https://github.com/bklieger-groq)
